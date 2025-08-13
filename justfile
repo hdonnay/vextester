@@ -7,6 +7,11 @@ tar := require('tar')
 jq := require('jq')
 just := just_executable()
 
+export PIPX_HOME := justfile_directory() / '.pipx' / 'venv'
+export PIPX_BIN_DIR := justfile_directory() / '.pipx' / 'bin'
+export PIPX_MAN_DIR := justfile_directory() / '.pipx' / 'man'
+export PATH := env('PATH') + ':' + PIPX_BIN_DIR
+
 url := 'https://security.access.redhat.com/data/csaf/v2/vex/'
 archive_pat := 'csaf_vex_????-??-??.tar.zst'
 split_pat := 'csaf_vex_????.tar.zst'
@@ -75,6 +80,18 @@ update: fetch && split
 clean:
 	@rm -vrf -- '{{cachedir}}' ||:
 
+# Validate all JSON documents.
+validate: check_split
+	#!/usr/bin/env -S zsh -euo pipefail
+	command -v jsonschema &>/dev/null ||
+		python3 -m pipx install sourcemeta-jsonschema
+	[[ {{cachedir / 'schema.json'}} -nt ./etc/csaf_json_schema.json ]] ||
+		jsonschema compile --http ./etc/csaf_json_schema.json >{{cachedir / 'schema.json'}}
+
+	{{parallel}} \
+		zsh -euo pipefail -- {{justfile_directory() / 'validate.zsh'}} {{cachedir / 'schema.json'}}\
+		'{}' \
+		::: {{cachedir / split_pat}}(.N)
 
 # Run the named jq script across a split archive.
 jq script: check_split

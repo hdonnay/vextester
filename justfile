@@ -93,6 +93,29 @@ validate: check_split
 		'{}' \
 		::: {{cachedir / split_pat}}(.N)
 
+# Print out CPEs present in VEX data but not the Red Hat CPE Dictionary.
+martian-cpes: check_split
+	#!/usr/bin/env -S zsh -euo pipefail
+	if ! command -v xan &>/dev/null; then
+		print need xan: https://github.com/medialab/xan >&2
+		exit 99
+	fi
+	if ! command -v xmlstarlet &>/dev/null; then
+		print need xmlstarlet >&2
+		exit 99
+	fi
+
+	curl -sSfL 'https://security.access.redhat.com/data/meta/v1/cpe-dictionary.xml' |
+		xmlstarlet sel -T -t -m '/_:cpe-list/_:cpe-item' -v '@name' -o , -v 'normalize-space(.)' -nl >{{cachedir / 'cpe_dict.csv'}}
+
+	{{parallel}} --files \
+			{{tar}} -xOaf '{}' \|\
+			{{jq}} --unbuffered -r -L ./jq/lib "'import \"lib\" as lib; tostream | lib::cpes | @text'" \
+			::: {{cachedir / split_pat}}(.N) |
+		xan cat rows -n --paths - |
+		xan sort -n -u >{{cachedir / 'found_cpes.csv'}}
+	xan join -L 'found' --anti 0 {{cachedir / 'found_cpes.csv'}} 0 {{cachedir / 'cpe_dict.csv'}}
+
 # Run the named jq script across a split archive.
 jq script: check_split
 	#!/usr/bin/env -S zsh -euo pipefail
